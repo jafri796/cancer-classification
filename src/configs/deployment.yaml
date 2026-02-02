@@ -1,0 +1,16 @@
+deployment:
+  docker:
+    image_name: pcam-classifier:latest
+    ports:
+      - 8000:8000
+    volumes:
+      - ./models:/app/models
+  kubernetes:
+    replicas: 3
+    resources:
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+      requests:
+        cpu: "1"
+        memory: "2Gi"

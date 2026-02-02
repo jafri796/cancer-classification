@@ -1,0 +1,15 @@
+__pycache__/
+.pytest_cache/
+.git/
+.github/
+data/
+experiments/
+models/
+venv/
+*.pyc
+*.pyo
+*.pyd
+*.h5
+*.pt
+*.onnx
+*.log

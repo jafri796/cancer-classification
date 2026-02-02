@@ -1,0 +1,40 @@
+# PCam Classification - Production Requirements
+# Pinned versions for FDA reproducibility
+# Last updated: 2026-01-27
+
+# Core Deep Learning
+torch==2.1.0
+torchvision==0.16.0
+
+# Medical Image Processing
+numpy==1.24.3
+opencv-python==4.8.1.78
+Pillow==10.1.0
+scikit-image==0.22.0
+h5py==3.10.0
+
+# Scientific Computing
+scipy==1.11.4
+scikit-learn==1.3.2
+
+# ML Operations
+mlflow==2.9.2
+tensorboard==2.15.1
+
+# Model Export
+onnx==1.15.0
+onnxruntime==1.16.3
+
+# Testing
+pytest==7.4.3
+pytest-cov==4.1.0
+
+# API
+fastapi==0.105.0
+uvicorn==0.25.0
+pydantic==2.5.2
+
+# Utilities
+pyyaml==6.0.1
+tqdm==4.66.1
+timm==0.9.12

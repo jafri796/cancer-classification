@@ -1,0 +1,15 @@
+data:
+  preprocessing:
+    stain_normalization:
+      enabled: true
+      reference_image: "data/references/reference_patch.png"
+      luminosity_threshold: 0.8
+      angular_percentile: 99.0
+    normalization:
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+  validation:
+    seed: 42
+    duplicate_check:
+      enabled: true
+      max_samples: 2000

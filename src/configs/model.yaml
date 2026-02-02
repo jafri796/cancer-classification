@@ -1,0 +1,14 @@
+model:
+  architectures:
+    resnet50:
+      pretrained: true
+      freeze_backbone: true
+    efficientnet_b3:
+      pretrained: true
+      freeze_backbone: true
+    vit_b16:
+      pretrained: true
+      freeze_backbone: true
+  calibration:
+    enabled: true
+    temperature: 1.0

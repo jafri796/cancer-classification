@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  pcam-api:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    runtime: nvidia
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../models:/app/models
+      - ../data:/app/data
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - DEPLOYMENT_CONFIG=config/deployment_config.yaml

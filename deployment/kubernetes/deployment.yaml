@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pcam-api
+  labels:
+    app: pcam-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pcam-api
+  template:
+    metadata:
+      labels:
+        app: pcam-api
+    spec:
+      containers:
+        - name: pcam-api
+          image: pcam-classifier:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: MODEL_PATH
+              value: "models/final_model.pt"
+            - name: MODEL_CONFIG
+              value: "config/model_config.yaml"
+            - name: DATA_CONFIG
+              value: "config/data_config.yaml"
+            - name: THRESHOLD
+              value: "0.5"
+            - name: USE_TTA
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 20
