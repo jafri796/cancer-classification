@@ -100,28 +100,33 @@ class TemperatureScaler(nn.Module):
             f"({len(logits)} samples)"
         )
         
-        logits_t = torch.tensor(logits, dtype=torch.float32)
-        labels_t = torch.tensor(labels, dtype=torch.float32)
+        logits_np = logits.flatten()
+        labels_np = labels.flatten()
 
-        optimizer = torch.optim.LBFGS([self.temperature], lr=0.1, max_iter=max_iter)
-        loss_fn = nn.BCEWithLogitsLoss()
+        # Grid search over temperature values to minimize ECE
+        best_temp = 1.0
+        best_ece = float('inf')
 
-        def _closure():
-            optimizer.zero_grad()
-            loss = loss_fn(self.forward(logits_t), labels_t)
-            loss.backward()
-            return loss
+        for t in np.concatenate([
+            np.arange(0.1, 1.0, 0.05),
+            np.arange(1.0, 5.0, 0.1),
+            np.arange(5.0, 20.0, 0.5),
+        ]):
+            scaled_probs = 1.0 / (1.0 + np.exp(-logits_np / max(t, 1e-6)))
+            ece = compute_ece(scaled_probs, labels_np)
+            if ece < best_ece:
+                best_ece = ece
+                best_temp = float(t)
 
-        optimizer.step(_closure)
-        
-        temperature_val = float(self.temperature.item())
+        self.temperature.data = torch.tensor([best_temp], dtype=torch.float32)
         self._is_fitted = True
-        
+
         logger.info(
-            f"Temperature scaler fitted: temperature={temperature_val:.4f}"
+            f"Temperature scaler fitted (ECE grid search): "
+            f"temperature={best_temp:.4f}, ECE={best_ece:.6f}"
         )
-        
-        return temperature_val
+
+        return best_temp
     
     def is_fitted(self) -> bool:
         """Check if scaler has been fitted."""
@@ -167,3 +172,67 @@ def compute_ece(probs: np.ndarray, labels: np.ndarray, n_bins: int = 15) -> floa
         bin_acc = labels[mask].mean()
         ece += np.abs(bin_acc - bin_prob) * (mask.mean())
     return float(ece)
+
+
+def optimize_ensemble_weights(
+    model_probs: list,
+    labels: np.ndarray,
+    metric: str = "auc",
+    n_trials: int = 5000,
+) -> np.ndarray:
+    """
+    Optimize ensemble weights on validation set to maximize AUC.
+
+    Uses constrained random search: w_i >= 0, sum(w) = 1.
+
+    CRITICAL: Must be called with VALIDATION set predictions only.
+    Never use test set predictions (data leakage).
+
+    Args:
+        model_probs: List of arrays, each (N,) calibrated probabilities
+            from one model on the validation set.
+        labels: Ground truth labels (N,) from the validation set.
+        metric: Optimization metric. 'auc' (default) or 'ece'.
+        n_trials: Number of random weight samples to evaluate.
+
+    Returns:
+        Optimal weight vector (K,) summing to 1.
+    """
+    from sklearn.metrics import roc_auc_score
+
+    K = len(model_probs)
+    if K < 2:
+        logger.warning("Only 1 model provided; returning weight [1.0]")
+        return np.array([1.0])
+
+    labels_flat = labels.flatten()
+    probs_matrix = np.stack([p.flatten() for p in model_probs], axis=0)  # (K, N)
+
+    best_score = -np.inf if metric == "auc" else np.inf
+    best_weights = np.ones(K) / K  # default: equal
+
+    rng = np.random.RandomState(42)
+
+    for _ in range(n_trials):
+        raw = rng.dirichlet(np.ones(K))
+        ensemble_prob = raw @ probs_matrix  # (N,)
+
+        if metric == "auc":
+            try:
+                score = roc_auc_score(labels_flat, ensemble_prob)
+            except ValueError:
+                continue
+            if score > best_score:
+                best_score = score
+                best_weights = raw.copy()
+        elif metric == "ece":
+            score = compute_ece(ensemble_prob, labels_flat)
+            if score < best_score:
+                best_score = score
+                best_weights = raw.copy()
+
+    logger.info(
+        f"Ensemble weight optimization ({n_trials} trials, metric={metric}): "
+        f"best_score={best_score:.6f}, weights={best_weights.round(4).tolist()}"
+    )
+    return best_weights

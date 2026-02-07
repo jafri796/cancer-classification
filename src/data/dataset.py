@@ -454,6 +454,3 @@ def create_dataloaders(
         return train_loader, val_loader, test_loader
     
     return train_loader, val_loader
-
-# Seed random operations for reproducibility
-np.random.seed(42)

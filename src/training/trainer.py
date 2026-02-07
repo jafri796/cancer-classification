@@ -25,7 +25,7 @@ import numpy as np
 from datetime import datetime
 
 from .metrics import MedicalMetrics
-from .losses import FocalLoss, WeightedBCELoss, AsymmetricLoss, ClinicalLoss
+from .losses import FocalLoss, WeightedBCELoss, AsymmetricLoss, ClinicalLoss, LabelSmoothingBCELoss
 from .callbacks import CallbackList, get_default_callbacks
 from ..utils.logging_utils import setup_logger, log_metrics
 from ..utils.reproducibility import set_seed
@@ -177,6 +177,12 @@ class Trainer:
             )
             logger.info("Using Clinical Loss (FN-weighted)")
         
+        elif loss_type == 'label_smoothing_bce':
+            criterion = LabelSmoothingBCELoss(
+                epsilon=loss_config.get('label_smoothing', 0.1),
+            )
+            logger.info(f"Using Label Smoothing BCE (epsilon={loss_config.get('label_smoothing', 0.1)})")
+        
         else:
             criterion = nn.BCEWithLogitsLoss()
             logger.info("Using standard BCE Loss")
@@ -204,28 +210,28 @@ class Trainer:
         # Different learning rates for backbone vs classifier
         base_lr = opt_config.get('lr', 1e-4)
         param_groups = [
-            {'params': backbone_params, 'lr': base_lr},
-            {'params': classifier_params, 'lr': base_lr * 10},  # Higher LR for classifier
+            {'params': backbone_params, 'lr': base_lr * 0.1},
+            {'params': classifier_params, 'lr': base_lr},
         ]
         
         if opt_type == 'adamw':
             optimizer = torch.optim.AdamW(
                 param_groups,
                 betas=opt_config.get('betas', [0.9, 0.999]),
-                weight_decay=opt_config.get('weight_decay', 1e-5),
+                weight_decay=opt_config.get('weight_decay', 0.01),
                 eps=opt_config.get('eps', 1e-8),
             )
         elif opt_type == 'adam':
             optimizer = torch.optim.Adam(
                 param_groups,
                 betas=opt_config.get('betas', [0.9, 0.999]),
-                weight_decay=opt_config.get('weight_decay', 1e-5),
+                weight_decay=opt_config.get('weight_decay', 0.01),
             )
         elif opt_type == 'sgd':
             optimizer = torch.optim.SGD(
                 param_groups,
                 momentum=opt_config.get('momentum', 0.9),
-                weight_decay=opt_config.get('weight_decay', 1e-5),
+                weight_decay=opt_config.get('weight_decay', 0.01),
                 nesterov=opt_config.get('nesterov', True),
             )
         else:
@@ -239,32 +245,53 @@ class Trainer:
         sched_config = self.config.get('lr_scheduler', {})
         sched_type = sched_config.get('type', 'cosine_annealing_warm_restarts')
         
+        warmup_epochs = sched_config.get('warmup_epochs', 2)
+
         if sched_type == 'cosine_annealing_warm_restarts':
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            main_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
                 self.optimizer,
                 T_0=sched_config.get('T_0', 10),
                 T_mult=sched_config.get('T_mult', 2),
                 eta_min=sched_config.get('eta_min', 1e-7),
             )
         elif sched_type == 'cosine':
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            main_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 self.optimizer,
-                T_max=self.config.get('epochs', 100),
+                T_max=max(self.config.get('epochs', 100) - warmup_epochs, 1),
                 eta_min=sched_config.get('eta_min', 1e-7),
             )
         elif sched_type == 'reduce_on_plateau':
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            main_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                 self.optimizer,
                 mode='max',
                 factor=sched_config.get('reduce_factor', 0.5),
                 patience=sched_config.get('reduce_patience', 5),
             )
         else:
-            scheduler = None
-        
-        if scheduler:
+            main_scheduler = None
+
+        if main_scheduler is None:
+            logger.info("No LR scheduler configured")
+            return None
+
+        # Wrap with linear warmup if warmup_epochs > 0
+        if warmup_epochs > 0 and sched_type != 'reduce_on_plateau':
+            warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+                self.optimizer,
+                start_factor=0.01,
+                end_factor=1.0,
+                total_iters=warmup_epochs,
+            )
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                self.optimizer,
+                schedulers=[warmup_scheduler, main_scheduler],
+                milestones=[warmup_epochs],
+            )
+            logger.info(f"LR Scheduler: {sched_type} with {warmup_epochs}-epoch linear warmup")
+        else:
+            scheduler = main_scheduler
             logger.info(f"LR Scheduler: {sched_type}")
-        
+
         return scheduler
     
     def train_epoch(self) -> Dict[str, float]:
@@ -567,3 +594,76 @@ class Trainer:
         logger.info(f"Resumed from epoch {checkpoint['epoch']}")
         
         return checkpoint
+
+    def train_two_phase(
+        self,
+        phase1_epochs: int = 5,
+        phase2_epochs: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        Two-phase training: linear probing then fine-tuning.
+
+        Phase 1 - Linear Probing:
+            Freeze entire backbone, train only classifier head.
+            Preserves pretrained features while adapting the head.
+
+        Phase 2 - Fine-Tuning:
+            Unfreeze selective backbone layers (per architecture defaults).
+            Lower backbone LR to avoid catastrophic forgetting.
+
+        Args:
+            phase1_epochs: Epochs for linear probing (default 5)
+            phase2_epochs: Epochs for fine-tuning (default 20)
+
+        Returns:
+            Combined training history from both phases
+        """
+        logger.info("=" * 60)
+        logger.info("TWO-PHASE TRAINING")
+        logger.info(f"  Phase 1 (linear probing): {phase1_epochs} epochs")
+        logger.info(f"  Phase 2 (fine-tuning):    {phase2_epochs} epochs")
+        logger.info("=" * 60)
+
+        # ---- Phase 1: freeze backbone, train classifier only ----
+        logger.info("PHASE 1: Linear Probing - freezing backbone")
+        backbone_param_states = {}
+        for name, param in self.model.named_parameters():
+            backbone_param_states[name] = param.requires_grad
+            if 'classifier' not in name and 'head' not in name and 'fc' not in name:
+                param.requires_grad = False
+
+        trainable_p1 = sum(
+            p.numel() for p in self.model.parameters() if p.requires_grad
+        )
+        logger.info(f"  Trainable parameters (phase 1): {trainable_p1:,}")
+
+        self.optimizer = self._setup_optimizer()
+        self.scheduler = self._setup_scheduler()
+
+        history_p1 = self.train(phase1_epochs)
+
+        # ---- Phase 2: unfreeze selective layers, fine-tune ----
+        logger.info("PHASE 2: Fine-Tuning - unfreezing selective backbone layers")
+        for name, param in self.model.named_parameters():
+            param.requires_grad = backbone_param_states[name]
+
+        trainable_p2 = sum(
+            p.numel() for p in self.model.parameters() if p.requires_grad
+        )
+        logger.info(f"  Trainable parameters (phase 2): {trainable_p2:,}")
+
+        self.stop_training = False
+        self.optimizer = self._setup_optimizer()
+        self.scheduler = self._setup_scheduler()
+
+        history_p2 = self.train(phase2_epochs)
+
+        combined = {
+            'train': history_p1['train'] + history_p2['train'],
+            'val': history_p1['val'] + history_p2['val'],
+            'clinical': history_p1['clinical'] + history_p2['clinical'],
+            'phase1_epochs': phase1_epochs,
+            'phase2_epochs': phase2_epochs,
+        }
+        logger.info("Two-phase training complete")
+        return combined

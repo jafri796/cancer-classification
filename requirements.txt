@@ -1,40 +1,45 @@
 # PCam Classification - Production Requirements
-# Pinned versions for FDA reproducibility
-# Last updated: 2026-01-27
+# Flexible versioning for cross-environment compatibility
+# Last updated: 2026-02-07
 
-# Core Deep Learning
-torch==2.1.0
-torchvision==0.16.0
+# Core Deep Learning - PyTorch ecosystem
+torch>=2.1.0,<2.5.0
+torchvision>=0.16.0,<0.20.0
 
 # Medical Image Processing
-numpy==1.24.3
-opencv-python==4.8.1.78
-Pillow==10.1.0
-scikit-image==0.22.0
-h5py==3.10.0
+numpy>=1.24.3,<2.0.0
+opencv-python>=4.8.0,<5.0.0
+Pillow>=10.0.0,<11.0.0
+scikit-image>=0.22.0,< 0.24.0
+h5py>=3.10.0,<4.0.0
 
 # Scientific Computing
-scipy==1.11.4
-scikit-learn==1.3.2
+scipy>=1.11.0,<1.14.0
+scikit-learn>=1.3.0,<1.6.0
 
-# ML Operations
-mlflow==2.9.2
-tensorboard==2.15.1
+# ML Operations & Tracking
+mlflow>=2.9.0,<3.0.0
+tensorboard>=2.15.0,<3.0.0
 
-# Model Export
-onnx==1.15.0
-onnxruntime==1.16.3
+# Model Export & Deployment
+onnx>=1.15.0,<2.0.0
+onnxruntime>=1.16.0,<2.0.0
 
-# Testing
-pytest==7.4.3
-pytest-cov==4.1.0
+# Testing Framework
+pytest>=7.4.0,<9.0.0
+pytest-cov>=4.1.0,<6.0.0
 
-# API
-fastapi==0.105.0
-uvicorn==0.25.0
-pydantic==2.5.2
+# API & Web Framework
+fastapi>=0.105.0,<0.115.0
+uvicorn[standard]>=0.25.0,<0.32.0
+pydantic>=2.5.0,<3.0.0
 
 # Utilities
-pyyaml==6.0.1
-tqdm==4.66.1
-timm==0.9.12
+PyYAML>=6.0.0,<7.0.0
+tqdm>=4.66.0,<5.0.0
+timm>=0.9.12,<1.0.0
+
+# Optional: Alternative backends if primary unavailable
+# Uncomment if needed for compatibility
+onnxruntime-gpu>=1.16.0,<2.0.0  # For GPU inference
+torch-tensorrt>=2.0.0  # TensorRT optimization

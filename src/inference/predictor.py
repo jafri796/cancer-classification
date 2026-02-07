@@ -26,7 +26,7 @@ from PIL import Image
 from src.models.center_aware_resnet import create_center_aware_resnet50
 from src.models.efficientnet import create_efficientnet
 from src.models.vit import create_vit
-from src.data.preprocessing import get_transforms, TestTimeAugmentation, StainNormalizer
+from src.data.preprocessing import get_transforms, TestTimeAugmentation, StainNormalizer, FitSetOrigin
 from src.inference.model_registry import load_pretrained_model
 from src.utils.reproducibility import set_seed
 
@@ -149,7 +149,7 @@ class PCamPredictor:
             angular_percentile=stain_cfg["angular_percentile"],
         )
         ref_img = np.array(Image.open(ref_path))
-        normalizer.fit(ref_img)
+        normalizer.fit(ref_img, declared_fit_set=FitSetOrigin.EXTERNAL_REFERENCE)
         return normalizer
 
     def _load_calibration(self, calibration_path: Union[str, Path]) -> None:
@@ -302,7 +302,49 @@ class PCamPredictor:
         }
 
     def predict_batch(self, images: List[Union[str, Path, Image.Image, np.ndarray]]) -> List[dict]:
+        """
+        Batch inference with true batched forward pass (no TTA path).
+
+        Falls back to sequential prediction when TTA is enabled since
+        TTA requires per-image augmentation variants.
+        """
+        if self.use_tta and self.tta_transforms:
+            return [self.predict(img) for img in images]
+
+        start_time = time.perf_counter()
+
+        # Preprocess all images into a single batch tensor
+        tensors = []
+        for img in images:
+            pil_img = self._load_image(img)
+            if self.stain_normalizer is not None:
+                np_img = np.array(pil_img)
+                np_img = self.stain_normalizer.normalize(np_img)
+                pil_img = Image.fromarray(np_img)
+            tensors.append(self.normalize_transform(pil_img))
+
+        batch = torch.stack(tensors).to(self.device)
+
+        with torch.no_grad():
+            if self.use_amp and self.device.type == "cuda":
+                with torch.cuda.amp.autocast():
+                    logits = self.model(batch)
+            else:
+                logits = self.model(batch)
+
+            logits = logits / max(self.temperature, 1e-6)
+            probs = torch.sigmoid(logits).cpu().numpy().flatten()
+
+        inference_time_ms = (time.perf_counter() - start_time) * 1000
+        self.inference_times.append(inference_time_ms)
+
         results = []
-        for image in images:
-            results.append(self.predict(image))
+        for prob in probs:
+            label = int(float(prob) >= self.threshold)
+            results.append({
+                "probability": float(prob),
+                "label": label,
+                "threshold": self.threshold,
+                "model_name": self.model_name,
+            })
         return results

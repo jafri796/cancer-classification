@@ -289,7 +289,12 @@ class ModelExporter:
                     dtype=torch.qint8,
                 )
                 
-                logger.warning("Static quantization not fully implemented, using dynamic")
+                logger.warning(
+                    "Static quantization falls back to dynamic quantization. "
+                    "True static quantization requires torch.quantization.prepare/convert "
+                    "with a representative calibration dataset pass. This is a known "
+                    "limitation tracked in the audit (Issue #18)."
+                )
                 
             else:
                 raise ValueError(f"Unknown method: {method}")

@@ -164,7 +164,7 @@ class CenterAwareEfficientNet(nn.Module):
         hidden_dims: List[int] = [512, 256],
         use_spatial_attention: bool = True,
         use_dual_pooling: bool = True,
-        freeze_stages: int = 0,
+        freeze_stages: int = 5,
     ):
         super().__init__()
         

@@ -152,10 +152,10 @@ class AugmentationConfig(BaseModel):
     vertical_flip: bool = True
     
     color_jitter: bool = True
-    brightness: float = Field(0.2, ge=0)
-    contrast: float = Field(0.2, ge=0)
-    saturation: float = Field(0.2, ge=0)
-    hue: float = Field(0.1, ge=0)
+    brightness: float = Field(0.05, ge=0)
+    contrast: float = Field(0.0, ge=0)
+    saturation: float = Field(0.1, ge=0)
+    hue: float = Field(0.02, ge=0)
     
     # Medical-specific
     elastic_deformation: bool = False

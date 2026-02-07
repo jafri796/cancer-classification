@@ -112,27 +112,26 @@ def create_callbacks(exp_dir: Path, config: dict) -> list:
     
     # Model checkpoint
     callbacks.append(ModelCheckpoint(
-        dirpath=exp_dir / "checkpoints",
-        filename="best_model",
-        monitor="val_auc",
+        checkpoint_dir=exp_dir / "checkpoints",
+        save_frequency=5,
+        monitor_metric="auc",
         mode="max",
-        save_top_k=1,
-        save_last=True,
+        save_best_only=False,
     ))
     
     # Early stopping
     early_stop_config = config.get("early_stopping", {})
     if early_stop_config.get("enabled", True):
         callbacks.append(EarlyStopping(
-            monitor="val_auc",
+            monitor_metric="auc",
             mode="max",
-            patience=early_stop_config.get("patience", 10),
-            min_delta=early_stop_config.get("min_delta", 0.001),
+            patience=early_stop_config.get("patience", 15),
+            min_delta=early_stop_config.get("min_delta", 0.0001),
         ))
     
     # Metrics logger
     callbacks.append(MetricsLogger(
-        log_dir=exp_dir / "logs",
+        log_frequency=100,
     ))
     
     # Learning rate monitor
@@ -197,13 +196,37 @@ def main():
     # Setup experiment
     exp_dir = setup_experiment(config, model_name)
     
-    # Create data loaders
+    # Create datasets and data loaders
     data_config = config.get("data", {})
-    train_loader, val_loader, _ = create_dataloaders(
-        data_dir=Path(data_config.get("data_dir", "data/raw")),
-        batch_size=data_config.get("batch_size", 64),
-        num_workers=data_config.get("num_workers", 4),
-        pin_memory=True,
+    data_dir = Path(data_config.get("data_dir", "data/raw"))
+    batch_size = data_config.get("batch_size", 64)
+    num_workers = data_config.get("num_workers", 4)
+
+    from src.data.dataset import PCamDataset
+    train_transform = get_transforms('train', data_config)
+    val_transform = get_transforms('val', data_config)
+
+    train_dataset = PCamDataset(
+        x_path=str(data_dir / "camelyonpatch_level_2_split_train_x.h5"),
+        y_path=str(data_dir / "camelyonpatch_level_2_split_train_y.h5"),
+        transform=train_transform,
+    )
+    val_dataset = PCamDataset(
+        x_path=str(data_dir / "camelyonpatch_level_2_split_valid_x.h5"),
+        y_path=str(data_dir / "camelyonpatch_level_2_split_valid_y.h5"),
+        transform=val_transform,
+    )
+
+    loader_config = {
+        'train_batch_size': batch_size,
+        'val_batch_size': batch_size,
+        'num_workers': num_workers,
+        'pin_memory': True,
+    }
+    train_loader, val_loader = create_dataloaders(
+        config=loader_config,
+        train_dataset=train_dataset,
+        val_dataset=val_dataset,
     )
     logger.info(f"Train samples: {len(train_loader.dataset):,}")
     logger.info(f"Val samples: {len(val_loader.dataset):,}")
@@ -217,12 +240,15 @@ def main():
     
     # Create trainer
     training_config = config.get("training", {})
+    training_config['checkpoint_dir'] = str(exp_dir / "checkpoints")
+    device = torch.device(args.device)
+
     trainer = Trainer(
         model=model,
-        device=args.device,
-        mixed_precision=training_config.get("mixed_precision", True),
-        gradient_accumulation_steps=training_config.get("gradient_accumulation", 1),
-        callbacks=callbacks,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        config=training_config,
+        device=device,
     )
     
     # Resume if specified
@@ -230,22 +256,30 @@ def main():
         if not args.resume.exists():
             logger.error(f"Checkpoint not found: {args.resume}")
             sys.exit(1)
-        trainer.load_checkpoint(args.resume)
+        trainer.load_checkpoint(str(args.resume))
         logger.info(f"Resumed from: {args.resume}")
     
-    # Train
+    # Train (use two-phase if configured, otherwise single-phase)
     logger.info("Starting training...")
+    epochs = training_config.get("epochs", 50)
+    use_two_phase = training_config.get("two_phase", {}).get("enabled", True)
     try:
-        trainer.fit(
-            train_loader=train_loader,
-            val_loader=val_loader,
-            epochs=training_config.get("epochs", 50),
-            learning_rate=training_config.get("learning_rate", 1e-4),
-            weight_decay=training_config.get("weight_decay", 1e-5),
-        )
+        if use_two_phase:
+            phase1 = training_config.get("two_phase", {}).get("phase1_epochs", 5)
+            phase2 = training_config.get("two_phase", {}).get("phase2_epochs", epochs - phase1)
+            history = trainer.train_two_phase(
+                phase1_epochs=phase1,
+                phase2_epochs=phase2,
+            )
+        else:
+            history = trainer.train(epochs=epochs)
     except KeyboardInterrupt:
         logger.info("Training interrupted by user")
-        trainer.save_checkpoint(exp_dir / "checkpoints" / "interrupted.pt")
+        trainer.save_checkpoint(
+            epoch=trainer.current_epoch,
+            metrics={},
+            is_best=False,
+        )
     
     logger.info(f"\n✓ Training complete. Results saved to: {exp_dir}")
 

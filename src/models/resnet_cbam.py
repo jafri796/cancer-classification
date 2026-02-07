@@ -69,7 +69,7 @@ class ResNet50CBAM(nn.Module):
         dropout: float = 0.5,
         hidden_dims: List[int] = [512],
         cbam_reduction: int = 16,
-        freeze_stages: int = 0,
+        freeze_stages: int = 4,
     ):
         super().__init__()
         if pretrained:

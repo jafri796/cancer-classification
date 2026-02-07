@@ -35,7 +35,7 @@ class DeiTSmallPCam(nn.Module):
         pretrained: bool = True,
         num_classes: int = 1,
         dropout: float = 0.3,
-        freeze_stages: int = 0,
+        freeze_stages: int = 6,
     ):
         super().__init__()
         self.model = timm.create_model("deit_small_patch16_224", pretrained=pretrained, num_classes=0)

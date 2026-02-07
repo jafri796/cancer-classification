@@ -297,6 +297,44 @@ class ClinicalLoss(nn.Module):
         return total_loss
 
 
+class LabelSmoothingBCELoss(nn.Module):
+    """
+    BCE loss with label smoothing for calibration.
+    
+    Medical Justification:
+    - Label smoothing prevents overconfident predictions
+    - Improves calibration (lower ECE)
+    - Targets become: y_smooth = y * (1 - epsilon) + 0.5 * epsilon
+    
+    Reference:
+        Szegedy et al. "Rethinking the Inception Architecture" CVPR 2016
+    
+    Args:
+        epsilon: Smoothing factor in [0, 1]. Default 0.1
+        reduction: 'mean', 'sum', or 'none'
+    """
+    
+    def __init__(self, epsilon: float = 0.1, reduction: str = 'mean'):
+        super().__init__()
+        assert 0 <= epsilon < 1, f"epsilon must be in [0, 1), got {epsilon}"
+        self.epsilon = epsilon
+        self.reduction = reduction
+        logger.info(f"Initialized LabelSmoothingBCELoss with epsilon={epsilon}")
+    
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """
+        Compute label-smoothed BCE loss.
+        
+        Args:
+            inputs: Logits from model (B, 1)
+            targets: Ground truth labels (B, 1) in {0, 1}
+        """
+        targets_smooth = targets * (1.0 - self.epsilon) + 0.5 * self.epsilon
+        return F.binary_cross_entropy_with_logits(
+            inputs, targets_smooth, reduction=self.reduction
+        )
+
+
 def get_loss_function(config: dict) -> nn.Module:
     """
     Factory function to create loss function from config.
@@ -332,6 +370,11 @@ def get_loss_function(config: dict) -> nn.Module:
             fn_weight=config.get('fn_weight', 3.0),
             focal_alpha=config.get('focal_alpha', 0.25),
             focal_gamma=config.get('focal_gamma', 2.0),
+        )
+    
+    elif loss_type == 'label_smoothing_bce':
+        return LabelSmoothingBCELoss(
+            epsilon=config.get('label_smoothing', 0.1),
         )
     
     elif loss_type == 'bce':

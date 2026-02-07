@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import torchvision.transforms as T
 import torchvision.transforms.functional as TF
-from typing import Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
 import logging
@@ -522,10 +522,10 @@ class MedicalAugmentation:
         rotation_angles: List[int] = [0, 90, 180, 270],
         horizontal_flip_prob: float = 0.5,
         vertical_flip_prob: float = 0.5,
-        color_jitter_brightness: float = 0.1,
-        color_jitter_contrast: float = 0.1,
+        color_jitter_brightness: float = 0.05,
+        color_jitter_contrast: float = 0.0,
         color_jitter_saturation: float = 0.1,
-        color_jitter_hue: float = 0.05,
+        color_jitter_hue: float = 0.02,
         color_jitter_prob: float = 0.5,
         normalize_mean: List[float] = [0.485, 0.456, 0.406],
         normalize_std: List[float] = [0.229, 0.224, 0.225],
@@ -660,15 +660,14 @@ def get_transforms(
             rotation_angles=config.get('rotation_angles', [0, 90, 180, 270]),
             horizontal_flip_prob=config.get('horizontal_flip_prob', 0.5),
             vertical_flip_prob=config.get('vertical_flip_prob', 0.5),
-            color_jitter_brightness=config.get('color_jitter_brightness', 0.1),
-            color_jitter_contrast=config.get('color_jitter_contrast', 0.1),
+            color_jitter_brightness=config.get('color_jitter_brightness', 0.05),
+            color_jitter_contrast=config.get('color_jitter_contrast', 0.0),
             color_jitter_saturation=config.get('color_jitter_saturation', 0.1),
-            color_jitter_hue=config.get('color_jitter_hue', 0.05),
+            color_jitter_hue=config.get('color_jitter_hue', 0.02),
             color_jitter_prob=config.get('color_jitter_prob', 0.5),
         )
     
     elif stage in ['val', 'test']:
-        # Validation/test: only normalization
         normalize_mean = config.get('normalize_mean', [0.485, 0.456, 0.406])
         normalize_std = config.get('normalize_std', [0.229, 0.224, 0.225])
         
