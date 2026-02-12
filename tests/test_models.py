@@ -261,10 +261,10 @@ class TestCenterAwareViT:
         loss = logits.sum()
         loss.backward()
         
-        # Check center bias gradients
-        if model.use_center_bias:
-            assert model.center_bias.bias.grad is not None
-            assert model.center_bias.bias.grad.abs().sum() > 0
+        # Check pooling gradients
+        if model.use_center_pooling and hasattr(model.pooling, 'proj'):
+            assert model.pooling.proj.weight.grad is not None
+            assert model.pooling.proj.weight.grad.abs().sum() > 0
         
         # Check classifier gradients
         for param in model.classifier.parameters():

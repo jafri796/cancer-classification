@@ -76,5 +76,5 @@ def create_deit_small(config: dict) -> DeiTSmallPCam:
         pretrained=config.get("pretrained", True),
         num_classes=config.get("num_classes", 1),
         dropout=config.get("dropout", 0.3),
-        freeze_stages=config.get("freeze_stages", 0),
+        freeze_stages=config.get("freeze_stages", 6),
     )

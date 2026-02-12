@@ -33,12 +33,6 @@ from src.models import (
     create_deit_small,
 )
 from src.training.trainer import Trainer
-from src.training.callbacks import (
-    ModelCheckpoint,
-    EarlyStopping,
-    MetricsLogger,
-    LearningRateMonitor,
-)
 from src.utils.reproducibility import set_seed
 
 logging.basicConfig(
@@ -50,9 +44,10 @@ logger = logging.getLogger(__name__)
 MODEL_FACTORIES = {
     "resnet50_se": create_center_aware_resnet50,
     "resnet50_cbam": create_resnet50_cbam,
-    "efficientnet_b0": lambda **kw: create_efficientnet(variant="b0", **kw),
-    "efficientnet_b1": lambda **kw: create_efficientnet(variant="b1", **kw),
-    "efficientnet_b2": lambda **kw: create_efficientnet(variant="b2", **kw),
+    "efficientnet_b0": lambda cfg: create_efficientnet({**cfg, 'architecture': 'efficientnet-b0'}),
+    "efficientnet_b1": lambda cfg: create_efficientnet({**cfg, 'architecture': 'efficientnet-b1'}),
+    "efficientnet_b2": lambda cfg: create_efficientnet({**cfg, 'architecture': 'efficientnet-b2'}),
+    "efficientnet_b3": lambda cfg: create_efficientnet({**cfg, 'architecture': 'efficientnet-b3'}),
     "vit_b16": create_vit,
     "deit_small": create_deit_small,
 }
@@ -87,15 +82,12 @@ def create_model(model_name: str, config: dict) -> torch.nn.Module:
     if model_name not in MODEL_FACTORIES:
         raise ValueError(f"Unknown model: {model_name}. Available: {list(MODEL_FACTORIES.keys())}")
     
-    model_config = config.get("model", {})
+    model_config = dict(config.get("model", {}))
+    model_config.setdefault("num_classes", 1)
+    model_config.setdefault("pretrained", True)
     factory = MODEL_FACTORIES[model_name]
     
-    model = factory(
-        num_classes=model_config.get("num_classes", 1),
-        pretrained=model_config.get("pretrained", True),
-        center_size=model_config.get("center_size", 32),
-        dropout_rate=model_config.get("dropout_rate", 0.3),
-    )
+    model = factory(model_config)
     
     logger.info(f"Created model: {model_name}")
     total_params = sum(p.numel() for p in model.parameters())
@@ -105,39 +97,6 @@ def create_model(model_name: str, config: dict) -> torch.nn.Module:
     
     return model
 
-
-def create_callbacks(exp_dir: Path, config: dict) -> list:
-    """Create training callbacks."""
-    callbacks = []
-    
-    # Model checkpoint
-    callbacks.append(ModelCheckpoint(
-        checkpoint_dir=exp_dir / "checkpoints",
-        save_frequency=5,
-        monitor_metric="auc",
-        mode="max",
-        save_best_only=False,
-    ))
-    
-    # Early stopping
-    early_stop_config = config.get("early_stopping", {})
-    if early_stop_config.get("enabled", True):
-        callbacks.append(EarlyStopping(
-            monitor_metric="auc",
-            mode="max",
-            patience=early_stop_config.get("patience", 15),
-            min_delta=early_stop_config.get("min_delta", 0.0001),
-        ))
-    
-    # Metrics logger
-    callbacks.append(MetricsLogger(
-        log_frequency=100,
-    ))
-    
-    # Learning rate monitor
-    callbacks.append(LearningRateMonitor())
-    
-    return callbacks
 
 
 def main():
@@ -235,12 +194,10 @@ def main():
     model = create_model(model_name, config)
     model = model.to(args.device)
     
-    # Create callbacks
-    callbacks = create_callbacks(exp_dir, config)
-    
     # Create trainer
     training_config = config.get("training", {})
     training_config['checkpoint_dir'] = str(exp_dir / "checkpoints")
+    training_config['model_name'] = model_name
     device = torch.device(args.device)
 
     trainer = Trainer(

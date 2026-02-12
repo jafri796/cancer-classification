@@ -26,6 +26,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _compute_ece(probs: np.ndarray, labels: np.ndarray, n_bins: int = 15) -> float:
+    """Expected Calibration Error (ECE) for monitoring calibration during training."""
+    probs = probs.flatten()
+    labels = labels.flatten()
+    bins = np.linspace(0.0, 1.0, n_bins + 1)
+    ece = 0.0
+    for i in range(n_bins):
+        mask = (probs > bins[i]) & (probs <= bins[i + 1])
+        if not np.any(mask):
+            continue
+        bin_prob = probs[mask].mean()
+        bin_acc = labels[mask].mean()
+        ece += np.abs(bin_acc - bin_prob) * mask.mean()
+    return float(ece)
+
+
 class MedicalMetrics:
     """
     Comprehensive medical metrics tracker.
@@ -147,6 +163,9 @@ class MedicalMetrics:
         metrics['true_negatives'] = int(tn)
         metrics['false_positives'] = int(fp)
         metrics['false_negatives'] = int(fn)
+        
+        # Expected Calibration Error (ECE)
+        metrics['ece'] = _compute_ece(y_prob, y_true)
         
         # Sample counts
         metrics['total_samples'] = len(y_true)

@@ -160,7 +160,7 @@ class CenterAwareEfficientNet(nn.Module):
         variant: Literal['b0', 'b1', 'b2', 'b3', 'b4'] = 'b3',
         pretrained: bool = True,
         num_classes: int = 1,
-        dropout: float = 0.3,
+        dropout: float = 0.4,
         hidden_dims: List[int] = [512, 256],
         use_spatial_attention: bool = True,
         use_dual_pooling: bool = True,
@@ -352,11 +352,11 @@ def create_efficientnet(config: Dict) -> CenterAwareEfficientNet:
         variant=variant,
         pretrained=config.get('pretrained', True),
         num_classes=config.get('num_classes', 1),
-        dropout=config.get('dropout', 0.3),
+        dropout=config.get('dropout', 0.4),
         hidden_dims=config.get('hidden_dims', [512, 256]),
         use_spatial_attention=config.get('use_spatial_attention', True),
         use_dual_pooling=config.get('use_dual_pooling', True),
-        freeze_stages=config.get('freeze_stages', 0),
+        freeze_stages=config.get('freeze_stages', 5),
     )
     
     logger.info(

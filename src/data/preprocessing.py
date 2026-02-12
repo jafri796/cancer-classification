@@ -558,20 +558,21 @@ class MedicalAugmentation:
         """
         # Rotation (tissue has no canonical orientation)
         if len(self.rotation_angles) > 1:
-            angle = np.random.choice(self.rotation_angles)
+            idx = torch.randint(len(self.rotation_angles), (1,)).item()
+            angle = self.rotation_angles[idx]
             if angle != 0:
                 image = TF.rotate(image, angle)
         
         # Horizontal flip
-        if np.random.rand() < self.horizontal_flip_prob:
+        if torch.rand(1).item() < self.horizontal_flip_prob:
             image = TF.hflip(image)
         
         # Vertical flip
-        if np.random.rand() < self.vertical_flip_prob:
+        if torch.rand(1).item() < self.vertical_flip_prob:
             image = TF.vflip(image)
         
         # Color jitter (simulate staining variations)
-        if np.random.rand() < self.color_jitter_prob:
+        if torch.rand(1).item() < self.color_jitter_prob:
             image = self.color_jitter(image)
         
         # Convert to tensor and normalize
@@ -661,10 +662,12 @@ def get_transforms(
             horizontal_flip_prob=config.get('horizontal_flip_prob', 0.5),
             vertical_flip_prob=config.get('vertical_flip_prob', 0.5),
             color_jitter_brightness=config.get('color_jitter_brightness', 0.05),
-            color_jitter_contrast=config.get('color_jitter_contrast', 0.0),
+            color_jitter_contrast=config.get('color_jitter_contrast', 0.05),
             color_jitter_saturation=config.get('color_jitter_saturation', 0.1),
             color_jitter_hue=config.get('color_jitter_hue', 0.02),
             color_jitter_prob=config.get('color_jitter_prob', 0.5),
+            normalize_mean=config.get('normalize_mean', [0.485, 0.456, 0.406]),
+            normalize_std=config.get('normalize_std', [0.229, 0.224, 0.225]),
         )
     
     elif stage in ['val', 'test']:

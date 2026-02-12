@@ -14,7 +14,7 @@ Implements:
 
 import torch
 import torch.nn as nn
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from torch.utils.data import DataLoader
 from pathlib import Path
 from typing import Dict, Optional, Any, Tuple
@@ -22,12 +22,10 @@ import logging
 from tqdm import tqdm
 import time
 import numpy as np
-from datetime import datetime
 
 from .metrics import MedicalMetrics
 from .losses import FocalLoss, WeightedBCELoss, AsymmetricLoss, ClinicalLoss, LabelSmoothingBCELoss
-from .callbacks import CallbackList, get_default_callbacks
-from ..utils.logging_utils import setup_logger, log_metrics
+from .callbacks import get_default_callbacks
 from ..utils.reproducibility import set_seed
 
 logger = logging.getLogger(__name__)
@@ -89,8 +87,6 @@ class Trainer:
         # Training state
         self.current_epoch = 0
         self.global_step = 0
-        self.best_metric = -float('inf')
-        self.patience_counter = 0
         
         # Setup loss function
         self.criterion = self._setup_loss()
@@ -103,7 +99,7 @@ class Trainer:
         
         # Setup mixed precision training
         self.use_amp = config.get('mixed_precision', {}).get('enabled', True)
-        self.scaler = GradScaler() if self.use_amp else None
+        self.scaler = GradScaler('cuda') if self.use_amp else None
         
         # Setup metrics tracker (clinical-grade)
         self.metrics = MedicalMetrics(
@@ -118,14 +114,6 @@ class Trainer:
         self.checkpoint_dir = Path(config.get('checkpoint_dir', 'experiments/checkpoints'))
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         
-        # Log initialization
-        logger.info(f"Trainer initialized on {device}")
-        logger.info(f"Seed set to {seed} for reproducibility")
-        
-        # Early stopping
-        self.early_stopping_patience = config.get('early_stopping', {}).get('patience', 15)
-        self.early_stopping_min_delta = config.get('early_stopping', {}).get('min_delta', 0.0001)
-        
         # Callback system (formalized callbacks for monitoring, checkpointing, etc.)
         self.callbacks = get_default_callbacks(
             checkpoint_dir=self.checkpoint_dir,
@@ -136,13 +124,10 @@ class Trainer:
         # Training control flag (can be set by callbacks like EarlyStopping)
         self.stop_training = False
         
-        # Log training configuration for reproducibility
-        logger.info(f"Training configuration: {self.config}")
-        
-        # Seed random operations for reproducibility
-        set_seed(self.config.get('seed', 42))
-        
-        logger.info(f"Trainer initialized on {device}")
+        logger.info(
+            f"Trainer initialized on {device} | AMP={self.use_amp} | "
+            f"accumulation_steps={self.accumulation_steps} | seed={seed}"
+        )
     
     def _setup_loss(self) -> nn.Module:
         """Setup loss function based on config."""
@@ -293,7 +278,7 @@ class Trainer:
             logger.info(f"LR Scheduler: {sched_type}")
 
         return scheduler
-    
+
     def train_epoch(self) -> Dict[str, float]:
         """Execute one training epoch."""
         self.model.train()
@@ -314,11 +299,9 @@ class Trainer:
             labels = labels.to(self.device, non_blocking=True)
             
             # Forward pass with mixed precision
-            with autocast(enabled=self.use_amp):
+            with autocast('cuda', enabled=self.use_amp):
                 logits = self.model(images)
                 loss = self.criterion(logits, labels)
-                
-                # Scale loss for gradient accumulation
                 loss = loss / self.accumulation_steps
             
             # Backward pass
@@ -331,7 +314,7 @@ class Trainer:
             if (batch_idx + 1) % self.accumulation_steps == 0:
                 # Gradient clipping
                 if self.config.get('gradient_clipping', {}).get('enabled', True):
-                    max_norm = self.config['gradient_clipping']['max_norm']
+                    max_norm = self.config.get('gradient_clipping', {}).get('max_norm', 1.0)
                     if self.use_amp:
                         self.scaler.unscale_(self.optimizer)
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm)
@@ -364,7 +347,7 @@ class Trainer:
         
         # Compute epoch metrics
         metrics = self.metrics.compute()
-        metrics['loss'] = epoch_loss / batch_count
+        metrics['loss'] = epoch_loss / max(batch_count, 1)
         
         return metrics
     
@@ -389,7 +372,7 @@ class Trainer:
             labels = labels.to(self.device, non_blocking=True)
             
             # Forward pass
-            with autocast(enabled=self.use_amp):
+            with autocast('cuda', enabled=self.use_amp):
                 logits = self.model(images)
                 loss = self.criterion(logits, labels)
             
@@ -557,6 +540,7 @@ class Trainer:
         checkpoint = {
             'epoch': epoch,
             'global_step': self.global_step,
+            'model_name': self.config.get('model_name', self.config.get('architecture', 'unknown')),
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,

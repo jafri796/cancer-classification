@@ -2,9 +2,8 @@
 Center-Aware Vision Transformer for PCam Classification
 
 CRITICAL: Implements center 32×32 region awareness through:
-1. Positional bias towards center patches
-2. Attention-weighted [CLS] token focusing on center
-3. Center-patch token pooling
+1. Center-weighted token pooling (CenterWeightedPooling)
+2. Custom classification head with LayerNorm + GELU
 
 Medical Justification:
 - ViT's self-attention captures long-range dependencies
@@ -37,84 +36,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import vit_b_16, ViT_B_16_Weights
-from typing import List, Optional, Dict, Tuple
+from typing import List, Dict
 import logging
-import math
 
 logger = logging.getLogger(__name__)
-
-
-class CenterPositionalBias(nn.Module):
-    """
-    Learnable positional bias emphasizing center patches.
-    
-    PCam Mapping (96×96 input, 16×16 patches, 6×6 grid):
-    - Center 32×32 pixels → patches at positions (2,2), (2,3), (3,2), (3,3)
-    - These 4 center patches should have higher attention weights
-    
-    Implementation:
-    - Learnable bias added to attention scores
-    - Initialized with center emphasis
-    - Model can adjust during training
-    """
-    
-    def __init__(
-        self,
-        num_patches: int = 36,  # 6×6 = 36 patches
-        grid_size: int = 6,
-        num_heads: int = 12,
-    ):
-        super().__init__()
-        
-        self.num_patches = num_patches
-        self.grid_size = grid_size
-        self.num_heads = num_heads
-        
-        # Learnable bias: (num_heads, num_patches, num_patches)
-        # bias[h, i, j] = attention bias from patch i to patch j for head h
-        self.bias = nn.Parameter(torch.zeros(num_heads, num_patches, num_patches))
-        
-        # Initialize with center emphasis
-        self._init_center_bias()
-    
-    def _init_center_bias(self):
-        """
-        Initialize bias to emphasize center patches.
-        
-        Center patches: (2,2), (2,3), (3,2), (3,3) in 6×6 grid
-        Linear indices: 2*6+2=14, 2*6+3=15, 3*6+2=20, 3*6+3=21
-        """
-        with torch.no_grad():
-            # Identify center patch indices
-            center_indices = []
-            for i in range(2, 4):  # rows 2,3
-                for j in range(2, 4):  # cols 2,3
-                    idx = i * self.grid_size + j
-                    center_indices.append(idx)
-            
-            # Add small positive bias to center patches
-            # This makes attention scores slightly higher for center patches
-            center_bias = 0.1
-            for idx in center_indices:
-                # Increase attention TO center patches (all queries)
-                self.bias[:, :, idx] += center_bias
-                # Increase attention FROM center patches (center as query)
-                self.bias[:, idx, :] += center_bias
-    
-    def forward(
-        self,
-        attention_scores: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Add positional bias to attention scores.
-        
-        Args:
-            attention_scores: (B, num_heads, num_patches, num_patches)
-            
-        Returns:
-            Biased attention scores: (B, num_heads, num_patches, num_patches)
-        """
-        return attention_scores + self.bias.unsqueeze(0)
 
 
 class CenterWeightedPooling(nn.Module):
@@ -192,15 +117,14 @@ class CenterAwareViT(nn.Module):
     Center-aware Vision Transformer for PCam binary classification.
     
     Architecture Modifications:
-    1. Center positional bias in attention layers
-    2. Center-weighted token pooling
-    3. Custom classification head
+    1. Center-weighted token pooling
+    2. Custom classification head
     
     Patch Analysis:
-    - Input: 96×96 pixels
-    - Patch size: 16×16 pixels
-    - Grid: 6×6 = 36 patches
-    - Center region (32×32): patches (2,2), (2,3), (3,2), (3,3)
+    - Input: 96x96 pixels
+    - Patch size: 16x16 pixels
+    - Grid: 6x6 = 36 patches
+    - Center region (32x32): patches (2,2), (2,3), (3,2), (3,3)
     
     Medical Validation:
     - Self-attention captures spatial relationships
@@ -208,16 +132,16 @@ class CenterAwareViT(nn.Module):
     - Peripheral context considered via attention
     
     Receptive Field:
-    - Each patch: 16×16 pixels
+    - Each patch: 16x16 pixels
     - Global self-attention: every patch can attend to every other
-    - Effective receptive field: entire 96×96 image
+    - Effective receptive field: entire 96x96 image
     
     Args:
-        pretrained: Use ImageNet21k pretrained weights
+        pretrained: Use ImageNet pretrained weights
         num_classes: Output classes (1 for binary)
         dropout: Dropout probability
         hidden_dims: Hidden dimensions in classifier
-        use_center_bias: Enable center positional bias
+        use_center_bias: Reserved for future attention-level bias
         use_center_pooling: Enable center-weighted pooling
         freeze_stages: Number of initial transformer blocks to freeze
     """
@@ -252,7 +176,7 @@ class CenterAwareViT(nn.Module):
         self.num_heads = 12
         self.num_layers = 12
         
-        # For 96×96 input: 96/16 = 6, so 6×6 = 36 patches
+        # For 96x96 input: 96/16 = 6, so 6x6 = 36 patches
         self.grid_size = 6
         self.num_patches = 36
         
@@ -261,14 +185,9 @@ class CenterAwareViT(nn.Module):
         self.class_token = backbone.class_token
         self.encoder = backbone.encoder
         
-        # Add center positional bias to attention layers
-        if self.use_center_bias:
-            self.center_bias = CenterPositionalBias(
-                num_patches=self.num_patches,
-                grid_size=self.grid_size,
-                num_heads=self.num_heads,
-            )
-            logger.info("Added center positional bias to attention")
+        # Resize positional embedding from 224x224 (14x14=196+1 tokens)
+        # to 96x96 (6x6=36+1 tokens) via bicubic interpolation
+        self._resize_pos_embedding()
         
         # Pooling strategy
         if self.use_center_pooling:
@@ -279,7 +198,6 @@ class CenterAwareViT(nn.Module):
             )
             logger.info("Using center-weighted pooling")
         else:
-            # Standard: use [CLS] token only
             self.pooling = lambda x: x[:, 0]
             logger.info("Using standard [CLS] token pooling")
         
@@ -290,8 +208,8 @@ class CenterAwareViT(nn.Module):
         for hidden_dim in hidden_dims:
             classifier_layers.extend([
                 nn.Linear(in_features, hidden_dim),
-                nn.LayerNorm(hidden_dim),  # LayerNorm (ViT standard)
-                nn.GELU(),  # GELU activation (ViT standard)
+                nn.LayerNorm(hidden_dim),
+                nn.GELU(),
                 nn.Dropout(dropout),
             ])
             in_features = hidden_dim
@@ -305,19 +223,48 @@ class CenterAwareViT(nn.Module):
         # Initialize new weights
         self._initialize_weights()
     
+    def _resize_pos_embedding(self):
+        """
+        Interpolate pretrained positional embedding from 224x224 (14x14 grid)
+        to 96x96 (6x6 grid). Without this the model crashes on 96x96 input
+        because pos_embedding has 197 tokens but the forward pass produces 37.
+        """
+        pos_emb = self.encoder.pos_embedding  # (1, 197, 768)
+        cls_token_emb = pos_emb[:, :1, :]     # (1, 1, 768)
+        patch_emb = pos_emb[:, 1:, :]         # (1, 196, 768)
+
+        orig_grid = int(patch_emb.shape[1] ** 0.5)  # 14
+        if orig_grid == self.grid_size:
+            return
+
+        patch_emb = patch_emb.reshape(1, orig_grid, orig_grid, -1).permute(0, 3, 1, 2)
+        patch_emb = F.interpolate(
+            patch_emb,
+            size=(self.grid_size, self.grid_size),
+            mode="bicubic",
+            align_corners=False,
+        )
+        patch_emb = patch_emb.permute(0, 2, 3, 1).reshape(
+            1, self.grid_size * self.grid_size, -1
+        )
+
+        new_pos_emb = torch.cat([cls_token_emb, patch_emb], dim=1)
+        self.encoder.pos_embedding = nn.Parameter(new_pos_emb)
+        logger.info(
+            f"Resized positional embedding: {pos_emb.shape} -> {new_pos_emb.shape}"
+        )
+
     def _freeze_stages(self, n_stages: int):
         """Freeze first n transformer blocks."""
         if n_stages == 0:
             return
         
-        # Freeze patch embedding
         if n_stages >= 1:
             for param in self.conv_proj.parameters():
                 param.requires_grad = False
         
-        # Freeze transformer blocks
         for i, block in enumerate(self.encoder.layers):
-            if i < n_stages - 1:  # -1 because we count conv_proj as stage 0
+            if i < n_stages - 1:
                 for param in block.parameters():
                     param.requires_grad = False
         
@@ -334,7 +281,6 @@ class CenterAwareViT(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
         
-        # Initialize center pooling if present
         if self.use_center_pooling and isinstance(self.pooling, CenterWeightedPooling):
             nn.init.trunc_normal_(self.pooling.proj.weight, std=0.02)
             if self.pooling.proj.bias is not None:
@@ -352,28 +298,19 @@ class CenterAwareViT(nn.Module):
         """
         B = x.size(0)
         
-        # Patch embedding: (B, 3, 96, 96) -> (B, hidden_dim, 6, 6)
         x = self.conv_proj(x)
         x = x.flatten(2).transpose(1, 2)  # (B, 36, hidden_dim)
         
-        # Add [CLS] token
-        cls_token = self.class_token.expand(B, -1, -1)  # (B, 1, hidden_dim)
+        cls_token = self.class_token.expand(B, -1, -1)
         x = torch.cat([cls_token, x], dim=1)  # (B, 37, hidden_dim)
         
-        # Add positional encoding (from backbone)
         x = x + self.encoder.pos_embedding
         
-        # Transformer encoder with optional center bias
-        # Note: Injecting center bias requires modifying attention mechanism
-        # For simplicity, we apply it post-hoc via pooling emphasis
         x = self.encoder.dropout(x)
         x = self.encoder.layers(x)
         x = self.encoder.ln(x)  # (B, 37, hidden_dim)
         
-        # Pooling (center-weighted or standard [CLS])
         features = self.pooling(x)  # (B, hidden_dim)
-        
-        # Classification
         logits = self.classifier(features)
         
         return logits
@@ -386,8 +323,6 @@ class CenterAwareViT(nn.Module):
         """
         Extract attention maps from specific layer.
         
-        Useful for visualizing which patches the model attends to.
-        
         Args:
             x: Input images (B, 3, 96, 96)
             layer_idx: Transformer layer index (-1 for last layer)
@@ -397,22 +332,16 @@ class CenterAwareViT(nn.Module):
         """
         B = x.size(0)
         
-        # Patch embedding
         x = self.conv_proj(x)
         x = x.flatten(2).transpose(1, 2)
         
-        # Add [CLS] token
         cls_token = self.class_token.expand(B, -1, -1)
         x = torch.cat([cls_token, x], dim=1)
         x = x + self.encoder.pos_embedding
         x = self.encoder.dropout(x)
         
-        # Forward through encoder and extract attention
         for i, layer in enumerate(self.encoder.layers):
             if i == layer_idx or (layer_idx == -1 and i == len(self.encoder.layers) - 1):
-                # Extract attention from this layer
-                # This requires accessing internal layer structure
-                # Simplified: return dummy for now
                 logger.warning("Attention map extraction requires custom ViT implementation")
                 return torch.zeros(B, self.num_heads, 37, 37)
             x = layer(x)
@@ -445,7 +374,7 @@ def create_vit(config: Dict) -> CenterAwareViT:
         hidden_dims=config.get('hidden_dims', [512, 256]),
         use_center_bias=config.get('use_center_bias', True),
         use_center_pooling=config.get('use_center_pooling', True),
-        freeze_stages=config.get('freeze_stages', 0),
+        freeze_stages=config.get('freeze_stages', 6),
     )
     
     logger.info(
@@ -463,7 +392,7 @@ def create_vit(config: Dict) -> CenterAwareViT:
 
 def verify_center_patch_mapping() -> Dict[str, any]:
     """
-    Verify that center 32×32 pixels map to correct patches.
+    Verify that center 32x32 pixels map to correct patches.
     
     CRITICAL FDA REQUIREMENT:
     - Must confirm center region corresponds to patches (2,2), (2,3), (3,2), (3,3)
@@ -476,11 +405,9 @@ def verify_center_patch_mapping() -> Dict[str, any]:
     patch_size = 16
     grid_size = input_size // patch_size  # 6
     
-    # Center region in pixels
     center_start = 32
     center_end = 64
     
-    # Map to patch coordinates
     center_patches = []
     for pixel_y in range(center_start, center_end):
         for pixel_x in range(center_start, center_end):
@@ -490,12 +417,10 @@ def verify_center_patch_mapping() -> Dict[str, any]:
             if patch_idx not in center_patches:
                 center_patches.append(patch_idx)
     
-    # Expected: [(2,2), (2,3), (3,2), (3,3)]
     expected_patches = [(2, 2), (2, 3), (3, 2), (3, 3)]
     
     matches = set(center_patches) == set(expected_patches)
     
-    # Linear indices
     center_linear = [p[0] * grid_size + p[1] for p in center_patches]
     expected_linear = [14, 15, 20, 21]
     
@@ -537,7 +462,6 @@ if __name__ == '__main__':
     print("\n2. Model Instantiation Test:")
     config = {
         'pretrained': False,  # Fast test
-        'use_center_bias': True,
         'use_center_pooling': True,
     }
     
@@ -556,12 +480,6 @@ if __name__ == '__main__':
     print("\n4. Gradient Flow Test:")
     loss = logits.sum()
     loss.backward()
-    
-    # Check center bias gradients
-    if model.use_center_bias:
-        bias_grad = model.center_bias.bias.grad
-        assert bias_grad is not None, "Center bias not receiving gradients"
-        print(f"  ✓ Center bias gradient: {bias_grad.abs().mean().item():.6f}")
     
     # Check classifier gradients
     for name, param in model.classifier.named_parameters():

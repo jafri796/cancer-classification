@@ -17,12 +17,10 @@ Design Principles:
 """
 
 import torch
-import torch.nn as nn
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 import logging
 from abc import ABC, abstractmethod
-import numpy as np
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -226,6 +224,7 @@ class ModelCheckpoint(Callback):
         checkpoint = {
             'epoch': epoch,
             'global_step': trainer.global_step,
+            'model_name': trainer.config.get('model_name', trainer.config.get('architecture', 'unknown')),
             'model_state_dict': trainer.model.state_dict(),
             'optimizer_state_dict': trainer.optimizer.state_dict(),
             'scheduler_state_dict': trainer.scheduler.state_dict() if trainer.scheduler else None,
@@ -294,13 +293,22 @@ class EarlyStopping(Callback):
         """Reset early stopping state."""
         self.wait_count = 0
         self.best_metric = -float('inf') if self.mode == 'max' else float('inf')
+        self.best_epoch = -1
+        self.best_weights = None
     
     def on_train_end(self, trainer, history):
-        """Log early stopping result."""
-        logger.info(
-            f"Early stopping: best model at epoch {self.best_epoch} "
-            f"with {self.monitor_metric}={self.best_metric:.4f}"
-        )
+        """Restore best weights if configured, and log result."""
+        if self.restore_best and self.best_weights is not None:
+            trainer.model.load_state_dict(self.best_weights)
+            logger.info(
+                f"Restored best model weights from epoch {self.best_epoch} "
+                f"({self.monitor_metric}={self.best_metric:.4f})"
+            )
+        else:
+            logger.info(
+                f"Early stopping: best model at epoch {self.best_epoch} "
+                f"with {self.monitor_metric}={self.best_metric:.4f}"
+            )
     
     def on_epoch_begin(self, trainer, epoch):
         pass

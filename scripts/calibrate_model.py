@@ -14,8 +14,10 @@ from src.data.preprocessing import get_transforms
 from src.inference.calibration import TemperatureScaler, optimize_thresholds, compute_ece
 from src.inference.model_registry import load_pretrained_model
 from src.models.center_aware_resnet import create_center_aware_resnet50
+from src.models.resnet_cbam import create_resnet50_cbam
 from src.models.efficientnet import create_efficientnet
 from src.models.vit import create_vit
+from src.models.deit import create_deit_small
 
 
 logging.basicConfig(level=logging.INFO)
@@ -43,10 +45,14 @@ def _load_model_from_checkpoint(model_cfg, checkpoint_path: Path):
         cfg["architecture"] = model_name.replace("_", "-")
     if cfg is None:
         raise ValueError(f"Model config not found for {model_name}")
-    if model_name.startswith("resnet"):
+    if model_name == "resnet50_cbam":
+        model = create_resnet50_cbam(cfg)
+    elif model_name.startswith("resnet"):
         model = create_center_aware_resnet50(cfg)
     elif model_name.startswith("efficientnet"):
         model = create_efficientnet(cfg)
+    elif model_name == "deit_small":
+        model = create_deit_small(cfg)
     elif model_name.startswith("vit"):
         model = create_vit(cfg)
     else:

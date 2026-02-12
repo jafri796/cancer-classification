@@ -6,7 +6,7 @@ model:
     efficientnet_b3:
       pretrained: true
       freeze_backbone: true
-    vit_b16:
+    deit_small:
       pretrained: true
       freeze_backbone: true
   calibration:

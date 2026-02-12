@@ -412,24 +412,25 @@ class ModelExporter:
                 providers=['CPUExecutionProvider']
             )
             
-            # Run inference
+            # Run inference (ONNX Runtime requires CPU numpy arrays)
             onnx_output = session.run(
                 None,
-                {'input': self.example_input.numpy()}
+                {'input': self.example_input.cpu().numpy()}
             )[0]
             
-            # Convert to tensor for comparison
+            # Convert to tensor for comparison (on CPU)
             onnx_output = torch.from_numpy(onnx_output)
+            ref_output = self.reference_output.cpu()
             
             # Numerical comparison
-            max_diff = torch.max(torch.abs(onnx_output - self.reference_output)).item()
+            max_diff = torch.max(torch.abs(onnx_output - ref_output)).item()
             rel_diff = torch.max(torch.abs(
-                (onnx_output - self.reference_output) / (self.reference_output + 1e-8)
+                (onnx_output - ref_output) / (ref_output + 1e-8)
             )).item()
             
             passed = torch.allclose(
                 onnx_output,
-                self.reference_output,
+                ref_output,
                 rtol=rtol,
                 atol=atol
             )

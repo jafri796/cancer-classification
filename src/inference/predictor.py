@@ -24,8 +24,10 @@ import yaml
 from PIL import Image
 
 from src.models.center_aware_resnet import create_center_aware_resnet50
+from src.models.resnet_cbam import create_resnet50_cbam
 from src.models.efficientnet import create_efficientnet
 from src.models.vit import create_vit
+from src.models.deit import create_deit_small
 from src.data.preprocessing import get_transforms, TestTimeAugmentation, StainNormalizer, FitSetOrigin
 from src.inference.model_registry import load_pretrained_model
 from src.utils.reproducibility import set_seed
@@ -176,10 +178,14 @@ class PCamPredictor:
             if cfg is None:
                 raise ValueError(f"Model config not found for {model_name}")
 
-            if model_name.startswith("resnet"):
+            if model_name == "resnet50_cbam":
+                model = create_resnet50_cbam(cfg)
+            elif model_name.startswith("resnet"):
                 model = create_center_aware_resnet50(cfg)
             elif model_name.startswith("efficientnet"):
                 model = create_efficientnet(cfg)
+            elif model_name == "deit_small":
+                model = create_deit_small(cfg)
             elif model_name.startswith("vit"):
                 model = create_vit(cfg)
             else:

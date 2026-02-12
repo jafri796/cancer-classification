@@ -41,6 +41,7 @@ class SchedulerType(str, Enum):
     """Supported learning rate schedulers."""
     STEPLR = "steplr"
     COSINE = "cosine"
+    COSINE_WARM_RESTARTS = "cosine_annealing_warm_restarts"
     EXPONENTIAL = "exponential"
     PLATEAU = "plateau"
 
@@ -49,9 +50,11 @@ class LossType(str, Enum):
     """Supported loss functions."""
     BCE = "bce"
     FOCAL = "focal"
+    FOCAL_LOSS = "focal_loss"
     WEIGHTED_BCE = "weighted_bce"
     ASYMMETRIC = "asymmetric"
     CLINICAL = "clinical"
+    LABEL_SMOOTHING_BCE = "label_smoothing_bce"
 
 
 class AugmentationType(str, Enum):
@@ -75,11 +78,14 @@ class OptimizerConfig(BaseModel):
 
 class SchedulerConfig(BaseModel):
     """Learning rate scheduler configuration."""
-    type: SchedulerType = SchedulerType.COSINE
-    warmup_epochs: int = Field(0, ge=0)
+    type: SchedulerType = SchedulerType.COSINE_WARM_RESTARTS
+    warmup_epochs: int = Field(5, ge=0)
     step_size: Optional[int] = Field(10, gt=0)
     gamma: float = Field(0.1, gt=0, le=1.0)
     t_max: Optional[int] = None
+    T_0: int = Field(10, gt=0, description="Initial restart period for warm restarts")
+    T_mult: int = Field(2, ge=1, description="Multiplier for restart period")
+    eta_min: float = Field(1e-7, ge=0, description="Minimum learning rate")
     patience: int = Field(5, gt=0)
 
     class Config:
@@ -88,11 +94,12 @@ class SchedulerConfig(BaseModel):
 
 class LossConfig(BaseModel):
     """Loss function configuration."""
-    type: LossType = LossType.FOCAL
+    type: LossType = LossType.FOCAL_LOSS
     focal_alpha: float = Field(0.25, ge=0, le=1.0)
     focal_gamma: float = Field(2.0, gt=0)
     pos_weight: float = Field(1.5, gt=0)
     fn_weight: float = Field(3.0, gt=0, description="Weight for false negatives in clinical loss")
+    label_smoothing: float = Field(0.1, ge=0, le=0.5, description="Label smoothing epsilon")
 
     class Config:
         use_enum_values = False
@@ -110,10 +117,15 @@ class TrainingConfig(BaseModel):
     loss: LossConfig = Field(default_factory=LossConfig)
     
     mixed_precision: bool = True
-    gradient_accumulation_steps: int = Field(1, gt=0)
+    gradient_accumulation_steps: int = Field(2, gt=0)
     
     early_stopping_patience: int = Field(15, gt=0)
     early_stopping_min_delta: float = Field(0.0001, ge=0)
+    
+    # Two-phase training
+    two_phase_enabled: bool = True
+    two_phase_phase1_epochs: int = Field(5, gt=0)
+    two_phase_phase2_epochs: int = Field(45, gt=0)
     
     num_workers: int = Field(8, ge=0)
     pin_memory: bool = True

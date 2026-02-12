@@ -147,6 +147,6 @@ def create_resnet50_cbam(config: dict) -> ResNet50CBAM:
         dropout=config.get("dropout", 0.5),
         hidden_dims=config.get("hidden_dims", [512]),
         cbam_reduction=config.get("cbam_reduction", 16),
-        freeze_stages=config.get("freeze_stages", 0),
+        freeze_stages=config.get("freeze_stages", 4),
     )
     return model
