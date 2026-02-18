@@ -132,7 +132,7 @@ class Trainer:
     def _setup_loss(self) -> nn.Module:
         """Setup loss function based on config."""
         loss_config = self.config.get('loss', {})
-        loss_type = loss_config.get('type', 'focal_loss')
+        loss_type = loss_config.get('type', 'label_smoothing_bce')
         
         if loss_type == 'focal_loss':
             criterion = FocalLoss(
@@ -228,7 +228,7 @@ class Trainer:
     def _setup_scheduler(self) -> Optional[torch.optim.lr_scheduler._LRScheduler]:
         """Setup learning rate scheduler."""
         sched_config = self.config.get('lr_scheduler', {})
-        sched_type = sched_config.get('type', 'cosine_annealing_warm_restarts')
+        sched_type = sched_config.get('type', 'cosine')
         
         warmup_epochs = sched_config.get('warmup_epochs', 2)
 

@@ -78,8 +78,8 @@ class OptimizerConfig(BaseModel):
 
 class SchedulerConfig(BaseModel):
     """Learning rate scheduler configuration."""
-    type: SchedulerType = SchedulerType.COSINE_WARM_RESTARTS
-    warmup_epochs: int = Field(5, ge=0)
+    type: SchedulerType = SchedulerType.COSINE
+    warmup_epochs: int = Field(2, ge=0)
     step_size: Optional[int] = Field(10, gt=0)
     gamma: float = Field(0.1, gt=0, le=1.0)
     t_max: Optional[int] = None
@@ -94,7 +94,7 @@ class SchedulerConfig(BaseModel):
 
 class LossConfig(BaseModel):
     """Loss function configuration."""
-    type: LossType = LossType.FOCAL_LOSS
+    type: LossType = LossType.LABEL_SMOOTHING_BCE
     focal_alpha: float = Field(0.25, ge=0, le=1.0)
     focal_gamma: float = Field(2.0, gt=0)
     pos_weight: float = Field(1.5, gt=0)
@@ -125,7 +125,7 @@ class TrainingConfig(BaseModel):
     # Two-phase training
     two_phase_enabled: bool = True
     two_phase_phase1_epochs: int = Field(5, gt=0)
-    two_phase_phase2_epochs: int = Field(45, gt=0)
+    two_phase_phase2_epochs: int = Field(20, gt=0)
     
     num_workers: int = Field(8, ge=0)
     pin_memory: bool = True

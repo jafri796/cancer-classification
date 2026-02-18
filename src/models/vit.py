@@ -154,7 +154,7 @@ class CenterAwareViT(nn.Module):
         hidden_dims: List[int] = [512, 256],
         use_center_bias: bool = True,
         use_center_pooling: bool = True,
-        freeze_stages: int = 0,
+        freeze_stages: int = 6,
     ):
         super().__init__()
         

@@ -133,6 +133,12 @@ def main():
         default="cuda" if torch.cuda.is_available() else "cpu",
         help="Device to train on (default: cuda if available)"
     )
+    parser.add_argument(
+        "--experiment-name",
+        type=str,
+        default="pcam_classification",
+        help="MLflow experiment name (default: pcam_classification)"
+    )
     
     args = parser.parse_args()
     
@@ -149,7 +155,7 @@ def main():
     logger.info(f"Random seed: {seed}")
     
     # Determine model
-    model_name = args.model or config.get("model", {}).get("architecture", "resnet50_se")
+    model_name = args.model or config.get("model", {}).get("architecture", "resnet50_cbam")
     logger.info(f"Training model: {model_name}")
     
     # Setup experiment
@@ -158,7 +164,7 @@ def main():
     # Create datasets and data loaders
     data_config = config.get("data", {})
     data_dir = Path(data_config.get("data_dir", "data/raw"))
-    batch_size = data_config.get("batch_size", 64)
+    batch_size = data_config.get("batch_size", 32)
     num_workers = data_config.get("num_workers", 4)
 
     from src.data.dataset import PCamDataset
@@ -200,12 +206,23 @@ def main():
     training_config['model_name'] = model_name
     device = torch.device(args.device)
 
+    # Initialize MLflow experiment tracker
+    experiment_tracker = None
+    try:
+        from src.mlops.experiment_tracking import MLflowTracker
+        experiment_tracker = MLflowTracker(experiment_name=args.experiment_name)
+        experiment_tracker.start_run(run_name=f"{model_name}_{exp_dir.name}")
+        logger.info(f"MLflow tracking enabled (experiment: {args.experiment_name})")
+    except Exception as e:
+        logger.warning(f"MLflow tracking unavailable: {e}. Training will continue without tracking.")
+
     trainer = Trainer(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
         config=training_config,
         device=device,
+        experiment_tracker=experiment_tracker,
     )
     
     # Resume if specified
@@ -238,6 +255,13 @@ def main():
             is_best=False,
         )
     
+    # End MLflow run
+    if experiment_tracker is not None:
+        try:
+            experiment_tracker.end_run()
+        except Exception:
+            pass
+
     logger.info(f"\n✓ Training complete. Results saved to: {exp_dir}")
 
 

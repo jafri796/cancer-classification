@@ -130,12 +130,12 @@ class ResNet50CBAM(nn.Module):
         x = self.bn1(x)
         x = self.relu(x)
         x = self.maxpool(x)
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.cbam4(x)
-        x = self.layer4(x)
-        x = self.cbam5(x)
+        x = self.layer1(x)          # conv2_x
+        x = self.layer2(x)          # conv3_x
+        x = self.layer3(x)          # conv4_x
+        x = self.cbam4(x)           # CBAM after conv4_x (1024-ch)
+        x = self.layer4(x)          # conv5_x
+        x = self.cbam5(x)           # CBAM after conv5_x (2048-ch)
         x = self.pool(x).view(x.size(0), -1)
         return self.classifier(x)
 

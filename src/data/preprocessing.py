@@ -662,7 +662,7 @@ def get_transforms(
             horizontal_flip_prob=config.get('horizontal_flip_prob', 0.5),
             vertical_flip_prob=config.get('vertical_flip_prob', 0.5),
             color_jitter_brightness=config.get('color_jitter_brightness', 0.05),
-            color_jitter_contrast=config.get('color_jitter_contrast', 0.05),
+            color_jitter_contrast=config.get('color_jitter_contrast', 0.0),
             color_jitter_saturation=config.get('color_jitter_saturation', 0.1),
             color_jitter_hue=config.get('color_jitter_hue', 0.02),
             color_jitter_prob=config.get('color_jitter_prob', 0.5),

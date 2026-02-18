@@ -8,15 +8,12 @@ training:
     betas: [0.9, 0.999]
     eps: 1e-8
   lr_scheduler:
-    type: cosine_annealing_warm_restarts
-    T_0: 10
-    T_mult: 2
+    type: cosine
     eta_min: 1e-7
-    warmup_epochs: 5
+    warmup_epochs: 2
   loss:
-    type: focal_loss
-    focal_alpha: 0.25
-    focal_gamma: 2.0
+    type: label_smoothing_bce
+    label_smoothing: 0.1
   mixed_precision:
     enabled: true
   gradient_clipping:
@@ -29,5 +26,5 @@ training:
   two_phase:
     enabled: true
     phase1_epochs: 5
-    phase2_epochs: 45
+    phase2_epochs: 20
   seed: 42
